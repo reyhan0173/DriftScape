@@ -39,7 +39,7 @@ AMVehicleBase::AMVehicleBase()
 	SpringArmComponent->SetRelativeRotation(FRotator(-10, 0 ,0));
 	SpringArmComponent->SetRelativeLocation(FVector(0,0,130));
 
-	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponent"));
+	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponents"));
 	CameraComponent->SetupAttachment(SpringArmComponent);
 
 	//Shift these lines to postInitialize
