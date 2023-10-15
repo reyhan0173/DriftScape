@@ -4,7 +4,9 @@
 #include "MVehicleBase.h"
 
 #include "MovieSceneSequenceID.h"
+#include "SNodePanel.h"
 #include "Components/ArrowComponent.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -15,11 +17,21 @@ AMVehicleBase::AMVehicleBase()
 	PrimaryActorTick.bCanEverTick = true;
 
 	BodyMeshC = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMeshC"));
+	
 	RootComponent = BodyMeshC;
+	
 	if(UStaticMesh* CarMesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), NULL, TEXT("/Script/Engine.StaticMesh'/Game/Assets/CarUpper.CarUpper'"))))
 	{
 		BodyMeshC->SetStaticMesh(CarMesh);
 	}
+
+	AC_Engine = CreateDefaultSubobject<UAudioComponent>(TEXT("AC_Engine"));
+	AC_Engine->SetupAttachment(BodyMeshC);
+	AC_Boost = CreateDefaultSubobject<UAudioComponent>(TEXT("AC_Boost"));
+	AC_Boost->SetupAttachment(BodyMeshC);
+	AC_Boost->SetAutoActivate(false);
+	
+	
 	//ToDo Add mesh here
 	ArrowC_FR = CreateDefaultSubobject<UArrowComponent>(TEXT("ArrowC_FR"));
 	ArrowC_FR->SetupAttachment(BodyMeshC, FName("WheelFR"));
@@ -33,6 +45,15 @@ AMVehicleBase::AMVehicleBase()
 	ArrowC_BR = CreateDefaultSubobject<UArrowComponent>(TEXT("ArrowC_BR"));
 	ArrowC_BR->SetupAttachment(BodyMeshC, FName("WheelBR"));
 	ArrowC_BR->SetRelativeRotation(FRotator(-90, 0, 0));
+
+	WheelSceneFR = CreateDefaultSubobject<USceneComponent>(TEXT("WheelSceneFR"));
+	WheelSceneFR->SetupAttachment(ArrowC_FR);
+	WheelSceneFL = CreateDefaultSubobject<USceneComponent>(TEXT("WheelSceneFL"));
+	WheelSceneFL->SetupAttachment(ArrowC_FL);
+	WheelSceneBR = CreateDefaultSubobject<USceneComponent>(TEXT("WheelSceneBR"));
+	WheelSceneBR->SetupAttachment(ArrowC_BR);
+	WheelSceneBL = CreateDefaultSubobject<USceneComponent>(TEXT("WheelSceneBL"));
+	WheelSceneBL->SetupAttachment(ArrowC_BL);
 
 	SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("USpringArmComponent"));
 	SpringArmComponent->SetupAttachment(BodyMeshC);
@@ -52,8 +73,11 @@ AMVehicleBase::AMVehicleBase()
 void AMVehicleBase::BeginPlay()
 {
 	Super::BeginPlay();
+	
 	//put them all in container
 	WheelArrowComponentHolder = {ArrowC_FR, ArrowC_FL, ArrowC_BL, ArrowC_BR};
+	//putting wheels into container
+	WheelSceneComponentHolder = {WheelSceneFR, WheelSceneFL, WheelSceneBL, WheelSceneBR};
 	//RestLength is axle length
 	MinLength = RestLength - SpringTravelLength;
 	MaxLength = RestLength + SpringTravelLength;
@@ -63,7 +87,15 @@ void AMVehicleBase::BeginPlay()
 	LineTraceCollisionQuery.bDebugQuery = true;
 	//Ignore collisions with itself 
 	LineTraceCollisionQuery.AddIgnoredActor(this);
-	
+
+	if (SW_Boost)
+	AC_Boost->SetSound(SW_Boost);
+	else
+		UE_LOG(LogTemp, Warning, TEXT("Undefined Boost Sound"));
+	if (SW_Engine)
+		AC_Engine->SetSound(SW_Engine);
+	else
+		UE_LOG(LogTemp, Warning, TEXT("Undefined Boost Sound"));	
 }
 
 void AMVehicleBase::PostInitializeComponents()
@@ -76,11 +108,17 @@ void AMVehicleBase::PostInitializeComponents()
 void AMVehicleBase::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	AC_Engine->SetPitchMultiplier(UKismetMathLibrary::MapRangeClamped(GetVehicleSpeed(),0,100,1,4));
 	for(int WheelArrowIndex=0; WheelArrowIndex<4; WheelArrowIndex++)
 	{
 		UpdateVehicleForce(WheelArrowIndex, DeltaTime);
 	}
 
+}
+
+float AMVehicleBase::GetVehicleSpeed() const
+{
+	return BodyMeshC->GetPhysicsLinearVelocity().Size()*0.036;
 }
 
 void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
@@ -91,18 +129,22 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 
 	//Store the indexed arrow into the variable "arrow"
 	auto wheelArrowC = WheelArrowComponentHolder[WheelArrowIndex];
+	
 	//Type FHitResult is a variable that stores the collisions and their types into the variable outHit
 	FHitResult outHit;
 	FVector startTraceLoc = wheelArrowC->GetComponentLocation();
 	FVector endTraceLoc = wheelArrowC->GetForwardVector()*(MaxLength + WheelRadius) + startTraceLoc;
+	
 	//Create the trace using LineTraceSingleByChannel
 	GetWorld()->LineTraceSingleByChannel(outHit, startTraceLoc, endTraceLoc, ECC_Camera, LineTraceCollisionQuery, FCollisionResponseParams());
 	float PreviousSpringLength = SpringLength[WheelArrowIndex];
+	
 	//these lines of code are used to obtain the local linear velocity of a physics-enabled component (BodyMeshC).
 	//This is useful for scenarios where you need to understand how a component is moving relative to its own orientation and position,
 	//which can be different from its motion in the global world coordinate system.
 	FVector WorldLinearVelocity = BodyMeshC->GetPhysicsLinearVelocity();
 	FVector localLinearVelocity = UKismetMathLibrary::InverseTransformDirection(BodyMeshC->GetComponentTransform(), WorldLinearVelocity);
+	
 	if(outHit.IsValidBlockingHit())
 	{
 		float currentSpringLength = outHit.Distance - WheelRadius;
@@ -120,12 +162,19 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 	}
 
 	float CurrentSteeringAngle = UKismetMathLibrary::MapRangeClamped(RightAxisValue, -1, 1, MaxSteeringAngle*-1, MaxSteeringAngle);
+
+	if(WheelArrowIndex<2)
+	{
+		WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeRotation(FRotator(0,0,CurrentSteeringAngle));
+	}
+
 	if(WorldLinearVelocity.SizeSquared() > 1) //If car is moving, add rotational torque
 	{
 		BodyMeshC->AddTorqueInDegrees(FVector(0, 0, CurrentSteeringAngle), NAME_None, true);
 	}
 
 	FVector frictionVector = FVector::ZeroVector;
+	
 	if(UKismetMathLibrary::Abs(localLinearVelocity.Y>2))
 	{
 		frictionVector = BodyMeshC->GetRightVector()*localLinearVelocity.Y*FrictionConst*-1;
@@ -137,7 +186,16 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 	{
 		netForce = WorldLinearVelocity*-1*BrakeConst;
 	}
+
+	if (bBoost)
+	{
+		BodyMeshC->AddImpulse(BodyMeshC->GetForwardVector()*BoostForceConst, NAME_None, true);
+		
+	}
 	BodyMeshC->AddForce(netForce);
+
+	WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeLocation(FVector(SpringLength[WheelArrowIndex],0 ,0));
+	WheelSceneComponentHolder[WheelArrowIndex]->GetChildComponent(0)->AddLocalRotation(FRotator((-1*360*localLinearVelocity.X*DeltaTime)/(2*3.14*WheelRadius), 0 ,0));
 }
 
 void AMVehicleBase::MoveForward(float Value)
@@ -147,10 +205,17 @@ void AMVehicleBase::MoveForward(float Value)
 
 void AMVehicleBase::MoveRight(float Value)
 {
-	//Slowly add axis value, to have a smoother turn
-	UKismetMathLibrary::FInterpTo(RightAxisValue, Value, GetWorld()->GetDeltaSeconds(), 5);
-	RightAxisValue = Value;
+	if(BodyMeshC->GetPhysicsLinearVelocity().Size() * 0.036 > 3)
+		RightAxisValue = UKismetMathLibrary::FInterpTo(RightAxisValue, Value, GetWorld()->GetDeltaSeconds(), 5);
+	else
+		RightAxisValue = 0;
 }
+
+	
+	//Slowly add axis value, to have a smoother turn
+	//
+	// UKismetMathLibrary::FInterpTo(RightAxisValue, Value, GetWorld()->GetDeltaSeconds(), 5);
+	// RightAxisValue = Value;
 
 void AMVehicleBase::BrakePressed()
 {
@@ -162,6 +227,18 @@ void AMVehicleBase::BrakeReleased()
 	BrakeApplied = false;
 }
 
+void AMVehicleBase::OnBoostPressed()
+{
+	bBoost = true;
+	AC_Boost->Activate();
+}
+
+void AMVehicleBase::OnBoostReleased()
+{
+	bBoost = false;
+	AC_Boost->Deactivate();
+}
+
 // Called to bind functionality to input
 void AMVehicleBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -170,8 +247,8 @@ void AMVehicleBase::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	PlayerInputComponent->BindAxis(FName("MoveRight"), this, &AMVehicleBase::MoveRight);
 	PlayerInputComponent->BindAction(FName("Brake"), IE_Pressed, this, &AMVehicleBase::BrakePressed);
 	PlayerInputComponent->BindAction(FName("Brake"), IE_Released, this, &AMVehicleBase::BrakeReleased);
+	PlayerInputComponent->BindAction(FName("Boost"), IE_Pressed, this, &AMVehicleBase::OnBoostPressed);
+	PlayerInputComponent->BindAction(FName("Boost"), IE_Released, this, &AMVehicleBase::OnBoostReleased);
 
 }
-
-
 
