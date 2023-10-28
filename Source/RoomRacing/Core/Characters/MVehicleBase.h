@@ -66,11 +66,16 @@ public:
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float MaxSteeringAngle = 30;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float torqueMultiplier = 1.5;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float FrictionConst = 500;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float lateralFrictionMultiplier = 0.5;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BrakeConst = 1000;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BoostForceConst = 10;
+	
 
 	//Asset Files
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
@@ -111,6 +116,13 @@ private:
 	float ForwardAxisValue;
 	float RightAxisValue;
 	bool bBoost = false;
+
+private:
+	// Load on each tire in Newtons
+	float TireLoad[4];
+	// Coefficient of friction, adjust this as needed
+	const float CoefficientOfFriction = 1.0f;
+	const float DragFrictionConst = 0.025f;
 
 	
 

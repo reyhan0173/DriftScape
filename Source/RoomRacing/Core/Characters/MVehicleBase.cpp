@@ -12,7 +12,7 @@
 
 // Sets default values
 AMVehicleBase::AMVehicleBase()
-{
+{ 
  	// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
@@ -73,7 +73,15 @@ AMVehicleBase::AMVehicleBase()
 void AMVehicleBase::BeginPlay()
 {
 	Super::BeginPlay();
+
 	
+		// Initialize tire load to 1/4th of the car's weight assuming evenly distributed
+		float initialLoad = BodyMeshC->GetMass() * 9.8 / 4; // Using 9.8 for gravity. Adjust if your game uses a different value.
+		for(int i = 0; i < 4; i++)
+		{
+			TireLoad[i] = initialLoad;
+		}
+
 	//put them all in container
 	WheelArrowComponentHolder = {ArrowC_FR, ArrowC_FL, ArrowC_BL, ArrowC_BR};
 	//putting wheels into container
@@ -121,81 +129,79 @@ float AMVehicleBase::GetVehicleSpeed() const
 	return BodyMeshC->GetPhysicsLinearVelocity().Size()*0.036;
 }
 
+
 void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 {
-	//Wheel arrow index selects the correct wheel to move and check collisions.
+	// Wheel arrow index selects the correct wheel to move and check collisions.
 	if(!WheelArrowComponentHolder.IsValidIndex(WheelArrowIndex))
 		return;
 
-	//Store the indexed arrow into the variable "arrow"
 	auto wheelArrowC = WheelArrowComponentHolder[WheelArrowIndex];
-	
-	//Type FHitResult is a variable that stores the collisions and their types into the variable outHit
 	FHitResult outHit;
 	FVector startTraceLoc = wheelArrowC->GetComponentLocation();
-	FVector endTraceLoc = wheelArrowC->GetForwardVector()*(MaxLength + WheelRadius) + startTraceLoc;
-	
-	//Create the trace using LineTraceSingleByChannel
+	FVector endTraceLoc = wheelArrowC->GetForwardVector() * (MaxLength + WheelRadius) + startTraceLoc;
+
 	GetWorld()->LineTraceSingleByChannel(outHit, startTraceLoc, endTraceLoc, ECC_Camera, LineTraceCollisionQuery, FCollisionResponseParams());
 	float PreviousSpringLength = SpringLength[WheelArrowIndex];
-	
-	//these lines of code are used to obtain the local linear velocity of a physics-enabled component (BodyMeshC).
-	//This is useful for scenarios where you need to understand how a component is moving relative to its own orientation and position,
-	//which can be different from its motion in the global world coordinate system.
+
 	FVector WorldLinearVelocity = BodyMeshC->GetPhysicsLinearVelocity();
 	FVector localLinearVelocity = UKismetMathLibrary::InverseTransformDirection(BodyMeshC->GetComponentTransform(), WorldLinearVelocity);
-	
+
 	if(outHit.IsValidBlockingHit())
 	{
 		float currentSpringLength = outHit.Distance - WheelRadius;
 		SpringLength[WheelArrowIndex] = UKismetMathLibrary::FClamp(currentSpringLength, MinLength, MaxLength);
-		float springVelocity = (PreviousSpringLength - SpringLength[WheelArrowIndex])/DeltaTime;
-		float springForce = (RestLength - SpringLength[WheelArrowIndex])*SpringForceConst;
-		float damperForce = springVelocity* DamperForceConst;
-		FVector upwardForce = GetActorUpVector()*(springForce + damperForce);
+		float springVelocity = (PreviousSpringLength - SpringLength[WheelArrowIndex]) / DeltaTime;
+		float springForce = (RestLength - SpringLength[WheelArrowIndex]) * SpringForceConst;
+		float damperForce = springVelocity * DamperForceConst;
+		FVector upwardForce = GetActorUpVector() * (springForce + damperForce);
 		BodyMeshC->AddForceAtLocation(upwardForce, wheelArrowC->GetComponentLocation());
 	}
-
 	else
 	{
 		SpringLength[WheelArrowIndex] = MaxLength;
 	}
 
-	float CurrentSteeringAngle = UKismetMathLibrary::MapRangeClamped(RightAxisValue, -1, 1, MaxSteeringAngle*-1, MaxSteeringAngle);
-
-	if(WheelArrowIndex<2)
+	float CurrentSteeringAngle = UKismetMathLibrary::MapRangeClamped(RightAxisValue, -1, 1, MaxSteeringAngle * -1, MaxSteeringAngle);
+	if(WheelArrowIndex < 2)
 	{
-		WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeRotation(FRotator(0,0,CurrentSteeringAngle));
+		WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeRotation(FRotator(0, 0, CurrentSteeringAngle));
 	}
 
-	if(WorldLinearVelocity.SizeSquared() > 1) //If car is moving, add rotational torque
+	if(WorldLinearVelocity.SizeSquared() > 1)
 	{
-		BodyMeshC->AddTorqueInDegrees(FVector(0, 0, CurrentSteeringAngle), NAME_None, true);
+		BodyMeshC->AddTorqueInDegrees(FVector(0, 0, CurrentSteeringAngle * torqueMultiplier), NAME_None, true);
 	}
 
-	FVector frictionVector = FVector::ZeroVector;
+	// Compute lateral friction.
+	FVector lateralFrictionVector = FVector::ZeroVector;
+	if(UKismetMathLibrary::Abs(localLinearVelocity.Y) > 2)
+	{
+		lateralFrictionVector = BodyMeshC->GetRightVector() * localLinearVelocity.Y * FrictionConst * -1 * lateralFrictionMultiplier;
+	}
 	
-	if(UKismetMathLibrary::Abs(localLinearVelocity.Y>2))
-	{
-		frictionVector = BodyMeshC->GetRightVector()*localLinearVelocity.Y*FrictionConst*-1;
-	}
+	// Compute drag friction.
+	FVector dragFrictionVector = -WorldLinearVelocity.GetSafeNormal() * WorldLinearVelocity.Size() * DragFrictionConst;
 
-	FVector netForce = GetActorForwardVector()*ForwardAxisValue*ForwardForceConst + frictionVector; //forward force + friction force
+	// Combine frictions.
+	FVector combinedFriction = lateralFrictionVector + dragFrictionVector;
+
+	// Apply combined forces.
+	FVector netForce = GetActorForwardVector() * ForwardAxisValue * ForwardForceConst + combinedFriction;
 
 	if(BrakeApplied)
 	{
-		netForce = WorldLinearVelocity*-1*BrakeConst;
+		netForce = WorldLinearVelocity * -1 * BrakeConst;
 	}
 
-	if (bBoost)
+	if(bBoost)
 	{
-		BodyMeshC->AddImpulse(BodyMeshC->GetForwardVector()*BoostForceConst, NAME_None, true);
-		
+		BodyMeshC->AddImpulse(BodyMeshC->GetForwardVector() * BoostForceConst, NAME_None, true);
 	}
 	BodyMeshC->AddForce(netForce);
 
-	WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeLocation(FVector(SpringLength[WheelArrowIndex],0 ,0));
-	WheelSceneComponentHolder[WheelArrowIndex]->GetChildComponent(0)->AddLocalRotation(FRotator((-1*360*localLinearVelocity.X*DeltaTime)/(2*3.14*WheelRadius), 0 ,0));
+	WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeLocation(FVector(SpringLength[WheelArrowIndex], 0, 0));
+	WheelSceneComponentHolder[WheelArrowIndex]->GetChildComponent(0)->AddLocalRotation(FRotator((-1 * 360 * localLinearVelocity.X * DeltaTime) / (2 * 3.14 * WheelRadius), 0, 0));
 }
 
 void AMVehicleBase::MoveForward(float Value)
