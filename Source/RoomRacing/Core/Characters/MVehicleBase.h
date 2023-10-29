@@ -59,20 +59,42 @@ public:
 	float WheelRadius = 30;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float SpringForceConst = 50000;
+	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float DamperForceConst = 5000;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float ForwardForceConst = 100000;
+	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float MaxSteeringAngle = 30;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
-	float torqueMultiplier = 1.5;
+	float turningtorqueMultiplier = 1.5;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float FrictionConst = 500;
+	
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float FrontWheelFrictionConst;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float BackWheelFrictionConst;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float NotDriftingFrictionMultiplier;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float IsDriftingFrictionMultiplier;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float lateralFrictionMultiplier = 0.5;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BrakeConst = 1000;
+
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float DriftStartSpeedThreshold = 1000;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly)
+	float SteeringAngleThreshold = 10;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float MaxTimeWithoutDrift = 1;
+	FVector locallinearvelocity; //deelte this
+	FVector combinedFriction;
+	FVector dragFrictionVector;
+	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BoostForceConst = 10;
 	
@@ -94,6 +116,8 @@ protected:
 protected:
 	UPROPERTY(BlueprintReadOnly)
 	bool BrakeApplied;
+	UPROPERTY(BlueprintReadOnly)
+	bool bHandbrakeApplied;
 
 public:	
 	// Called every frame
@@ -116,6 +140,16 @@ private:
 	float ForwardAxisValue;
 	float RightAxisValue;
 	bool bBoost = false;
+	bool bIsDrifting = false;
+	float DriftTimer = 0.0f;
+	const float MaxDriftDuration = 3.0f;
+	float currentFrictionConst;
+	float DriftFrictionMultiplier;
+	float VehicleSpeed;
+	float CurrentSteeringAngle;
+	
+	FVector lateralFrictionVector = FVector::ZeroVector;
+	
 
 private:
 	// Load on each tire in Newtons
@@ -124,12 +158,13 @@ private:
 	const float CoefficientOfFriction = 1.0f;
 	const float DragFrictionConst = 0.025f;
 
-	
 
 private:
 	void UpdateVehicleForce(int WheelArrowIndex, float DeltaTime);
 	void MoveForward(float Value);
 	void MoveRight(float Value);
+	void HandbrakePressed();
+	void HandbrakeReleased();
 	void BrakePressed();
 	void BrakeReleased();
 	void OnBoostPressed();
@@ -138,3 +173,5 @@ private:
 };
 
 
+
+	

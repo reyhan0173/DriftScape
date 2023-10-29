@@ -3,6 +3,8 @@
 
 #include "MVehicleBase.h"
 
+#include <iostream>
+
 #include "MovieSceneSequenceID.h"
 #include "SNodePanel.h"
 #include "Components/ArrowComponent.h"
@@ -122,6 +124,30 @@ void AMVehicleBase::Tick(float DeltaTime)
 		UpdateVehicleForce(WheelArrowIndex, DeltaTime);
 	}
 
+	////////////WARNING LOGS////////////////////////////////////////////
+	
+	UE_LOG(LogTemp, Warning, TEXT("driftfrictionmultiplier %f"), DriftFrictionMultiplier);
+	UE_LOG(LogTemp, Warning, TEXT("IsDrifting:%hhd"), bIsDrifting);
+	UE_LOG(LogTemp, Warning, TEXT("IsHandBreakPressed %hhd"), bHandbrakeApplied);
+	bool bIsAboveThreshold = VehicleSpeed > DriftStartSpeedThreshold;
+	UE_LOG(LogTemp, Warning, TEXT("VehicleSpeed > DriftStartSpeedThreshold: %s"), bIsAboveThreshold ? TEXT("True") : TEXT("False"));
+	bool bIsAboveSteeringThreshold = FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold;
+	UE_LOG(LogTemp, Warning, TEXT("FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold: %s"), bIsAboveSteeringThreshold ? TEXT("True") : TEXT("False"));
+
+	
+
+	UE_LOG(LogTemp, Warning, TEXT("driftfrictionmultiplier %f"), DriftFrictionMultiplier);
+	// UE_LOG(LogTemp, Warning, TEXT("Current Friction: %lf"), currentFrictionConst);
+	// UE_LOG(LogTemp, Warning, TEXT("isDrifting?: %d"), bIsDrifting);
+	// UE_LOG(LogTemp, Warning, TEXT("locallinearvelocity.y %f"), locallinearvelocity.Y);
+	// UE_LOG(LogTemp, Warning, TEXT("dragfrictionconst %f"), DragFrictionConst);
+	// UE_LOG(LogTemp, Warning, TEXT("lateralfriction vector X=%f, Y=%f, Z=%f"), lateralFrictionVector.X, lateralFrictionVector.Y, lateralFrictionVector.Z);
+	// UE_LOG(LogTemp, Warning, TEXT("combinedfriction %f"), combinedFriction);
+	// UE_LOG(LogTemp, Warning, TEXT("lateralfrictionmultipler %f"), lateralFrictionMultiplier);
+	//
+	// UE_LOG(LogTemp, Warning, TEXT("Right Vector: %s"), *BodyMeshC->GetRightVector().ToString());
+
+
 }
 
 float AMVehicleBase::GetVehicleSpeed() const
@@ -146,7 +172,7 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 
 	FVector WorldLinearVelocity = BodyMeshC->GetPhysicsLinearVelocity();
 	FVector localLinearVelocity = UKismetMathLibrary::InverseTransformDirection(BodyMeshC->GetComponentTransform(), WorldLinearVelocity);
-
+	locallinearvelocity = localLinearVelocity;
 	if(outHit.IsValidBlockingHit())
 	{
 		float currentSpringLength = outHit.Distance - WheelRadius;
@@ -162,29 +188,64 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 		SpringLength[WheelArrowIndex] = MaxLength;
 	}
 
-	float CurrentSteeringAngle = UKismetMathLibrary::MapRangeClamped(RightAxisValue, -1, 1, MaxSteeringAngle * -1, MaxSteeringAngle);
+	CurrentSteeringAngle = UKismetMathLibrary::MapRangeClamped(RightAxisValue, -1, 1, MaxSteeringAngle * -1, MaxSteeringAngle);
+
+	
 	if(WheelArrowIndex < 2)
 	{
 		WheelSceneComponentHolder[WheelArrowIndex]->SetRelativeRotation(FRotator(0, 0, CurrentSteeringAngle));
 	}
+	
 
 	if(WorldLinearVelocity.SizeSquared() > 1)
 	{
-		BodyMeshC->AddTorqueInDegrees(FVector(0, 0, CurrentSteeringAngle * torqueMultiplier), NAME_None, true);
+		BodyMeshC->AddTorqueInDegrees(FVector(0, 0, CurrentSteeringAngle * turningtorqueMultiplier), NAME_None, true);
 	}
 
 	// Compute lateral friction.
-	FVector lateralFrictionVector = FVector::ZeroVector;
+	VehicleSpeed = WorldLinearVelocity.Size();
+	
+	if (bHandbrakeApplied && VehicleSpeed > DriftStartSpeedThreshold && FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold) {
+		bIsDrifting = true;
+		DriftTimer = 0.0f;
+	}
+	if (bIsDrifting)
+	{
+		// If the drift conditions aren't being met, start or extend the drift timer
+		if (FMath::Abs(CurrentSteeringAngle) <= SteeringAngleThreshold) {
+			DriftTimer += DeltaTime;
+		} else {
+			DriftTimer = 0.0f; // Reset the timer if you're back to a sufficient steering angle
+		}
+    
+		// If the timer exceeds a certain threshold, end the drift
+		if (DriftTimer >= MaxTimeWithoutDrift) {
+			bIsDrifting = false;
+		}
+	}
+	DriftFrictionMultiplier = (bIsDrifting && WheelArrowIndex >= 2) ? IsDriftingFrictionMultiplier : NotDriftingFrictionMultiplier;
+	
+	if(WheelArrowIndex < 2) // Assuming indexes 0 and 1 are the front wheels
+		{
+		currentFrictionConst = FrontWheelFrictionConst;
+		}
+	else
+	{
+		currentFrictionConst = BackWheelFrictionConst * DriftFrictionMultiplier;
+	}
 	if(UKismetMathLibrary::Abs(localLinearVelocity.Y) > 2)
 	{
-		lateralFrictionVector = BodyMeshC->GetRightVector() * localLinearVelocity.Y * FrictionConst * -1 * lateralFrictionMultiplier;
+		lateralFrictionVector = BodyMeshC->GetRightVector() * localLinearVelocity.Y * currentFrictionConst * -1 * lateralFrictionMultiplier;
 	}
+
+
+
 	
 	// Compute drag friction.
-	FVector dragFrictionVector = -WorldLinearVelocity.GetSafeNormal() * WorldLinearVelocity.Size() * DragFrictionConst;
+	dragFrictionVector = -WorldLinearVelocity.GetSafeNormal() * WorldLinearVelocity.Size() * DragFrictionConst;
 
 	// Combine frictions.
-	FVector combinedFriction = lateralFrictionVector + dragFrictionVector;
+	combinedFriction = lateralFrictionVector + dragFrictionVector;
 
 	// Apply combined forces.
 	FVector netForce = GetActorForwardVector() * ForwardAxisValue * ForwardForceConst + combinedFriction;
@@ -215,6 +276,15 @@ void AMVehicleBase::MoveRight(float Value)
 		RightAxisValue = UKismetMathLibrary::FInterpTo(RightAxisValue, Value, GetWorld()->GetDeltaSeconds(), 5);
 	else
 		RightAxisValue = 0;
+}
+
+void AMVehicleBase::HandbrakePressed()
+{
+	bHandbrakeApplied = true;
+}
+void AMVehicleBase::HandbrakeReleased()
+{
+	bHandbrakeApplied = false;
 }
 
 	
@@ -255,6 +325,8 @@ void AMVehicleBase::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	PlayerInputComponent->BindAction(FName("Brake"), IE_Released, this, &AMVehicleBase::BrakeReleased);
 	PlayerInputComponent->BindAction(FName("Boost"), IE_Pressed, this, &AMVehicleBase::OnBoostPressed);
 	PlayerInputComponent->BindAction(FName("Boost"), IE_Released, this, &AMVehicleBase::OnBoostReleased);
+	PlayerInputComponent->BindAction(FName("Handbrake"), IE_Pressed, this, &AMVehicleBase::HandbrakePressed);
+	PlayerInputComponent->BindAction(FName("Handbrake"), IE_Released, this, &AMVehicleBase::HandbrakeReleased);
 
 }
 
