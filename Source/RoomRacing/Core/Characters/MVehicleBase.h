@@ -4,9 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Camera/CameraComponent.h"
-
 #include "GameFramework/Pawn.h"
-
 #include "MVehicleBase.generated.h"
 
 class USpringArmComponent;
@@ -48,6 +46,8 @@ public:
 	class UAudioComponent* AC_Engine;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	class UAudioComponent* AC_Boost;
+
+	
 	
 
 	//Exposed Variable
@@ -85,15 +85,25 @@ public:
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BrakeConst = 1000;
 
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bIsDrifting = false;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float DriftStartSpeedThreshold = 1000;
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float SteeringAngleThreshold = 10;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float MinimumDriftSidewaysMovement = 0.7f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	float MaxTimeWithoutDrift = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool isMovingSideways;
+
 	FVector locallinearvelocity; //deelte this
 	FVector combinedFriction;
 	FVector dragFrictionVector;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float FrictionInterpolationSpeed = 0.05f;
 	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly)
 	float BoostForceConst = 10;
@@ -140,13 +150,16 @@ private:
 	float ForwardAxisValue;
 	float RightAxisValue;
 	bool bBoost = false;
-	bool bIsDrifting = false;
 	float DriftTimer = 0.0f;
 	const float MaxDriftDuration = 3.0f;
 	float currentFrictionConst;
 	float DriftFrictionMultiplier;
 	float VehicleSpeed;
 	float CurrentSteeringAngle;
+	float CurrentFrictionMultiplier;
+	float TargetFrictionMultiplier;
+	float velocityDirectionDot;
+	
 	
 	FVector lateralFrictionVector = FVector::ZeroVector;
 	

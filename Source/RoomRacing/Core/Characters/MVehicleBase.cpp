@@ -69,6 +69,8 @@ AMVehicleBase::AMVehicleBase()
 	//Shift these lines to postInitialize
 	BodyMeshC->SetSimulatePhysics(true);
 	BodyMeshC->SetMassOverrideInKg(NAME_None, 1152);
+
+
 }
 
 // Called when the game starts or when spawned
@@ -105,7 +107,11 @@ void AMVehicleBase::BeginPlay()
 	if (SW_Engine)
 		AC_Engine->SetSound(SW_Engine);
 	else
-		UE_LOG(LogTemp, Warning, TEXT("Undefined Boost Sound"));	
+		UE_LOG(LogTemp, Warning, TEXT("Undefined Boost Sound"));
+
+	//More drift ( initialization )
+	CurrentFrictionMultiplier = NotDriftingFrictionMultiplier;
+	TargetFrictionMultiplier = NotDriftingFrictionMultiplier;
 }
 
 void AMVehicleBase::PostInitializeComponents()
@@ -129,14 +135,7 @@ void AMVehicleBase::Tick(float DeltaTime)
 	UE_LOG(LogTemp, Warning, TEXT("driftfrictionmultiplier %f"), DriftFrictionMultiplier);
 	UE_LOG(LogTemp, Warning, TEXT("IsDrifting:%hhd"), bIsDrifting);
 	UE_LOG(LogTemp, Warning, TEXT("IsHandBreakPressed %hhd"), bHandbrakeApplied);
-	bool bIsAboveThreshold = VehicleSpeed > DriftStartSpeedThreshold;
-	UE_LOG(LogTemp, Warning, TEXT("VehicleSpeed > DriftStartSpeedThreshold: %s"), bIsAboveThreshold ? TEXT("True") : TEXT("False"));
-	bool bIsAboveSteeringThreshold = FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold;
-	UE_LOG(LogTemp, Warning, TEXT("FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold: %s"), bIsAboveSteeringThreshold ? TEXT("True") : TEXT("False"));
-
-	
-
-	UE_LOG(LogTemp, Warning, TEXT("driftfrictionmultiplier %f"), DriftFrictionMultiplier);
+	UE_LOG(LogTemp, Warning, TEXT("CurrentFrictionMultiplier: %f, TargetFrictionMultiplier: %f"), CurrentFrictionMultiplier, TargetFrictionMultiplier);
 	// UE_LOG(LogTemp, Warning, TEXT("Current Friction: %lf"), currentFrictionConst);
 	// UE_LOG(LogTemp, Warning, TEXT("isDrifting?: %d"), bIsDrifting);
 	// UE_LOG(LogTemp, Warning, TEXT("locallinearvelocity.y %f"), locallinearvelocity.Y);
@@ -205,14 +204,21 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 	// Compute lateral friction.
 	VehicleSpeed = WorldLinearVelocity.Size();
 	
-	if (bHandbrakeApplied && VehicleSpeed > DriftStartSpeedThreshold && FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold) {
+	if (bHandbrakeApplied && VehicleSpeed > DriftStartSpeedThreshold && FMath::Abs(CurrentSteeringAngle) > SteeringAngleThreshold && !bIsDrifting) {
 		bIsDrifting = true;
 		DriftTimer = 0.0f;
+		CurrentFrictionMultiplier = IsDriftingFrictionMultiplier;
 	}
+	//Compute the Dot Product between the car's forward direction and the velocity direction to calculate if the car is moving sideways
+	velocityDirectionDot = FVector::DotProduct(WorldLinearVelocity.GetSafeNormal(), GetActorForwardVector());
+
+	// Check if the car is moving sufficiently sideways
+	isMovingSideways = velocityDirectionDot < MinimumDriftSidewaysMovement; 
+	
 	if (bIsDrifting)
 	{
-		// If the drift conditions aren't being met, start or extend the drift timer
-		if (FMath::Abs(CurrentSteeringAngle) <= SteeringAngleThreshold) {
+		// If the drift conditions aren't being met (not moving sideways), start or extend the drift timer
+		if (!isMovingSideways) {
 			DriftTimer += DeltaTime;
 		} else {
 			DriftTimer = 0.0f; // Reset the timer if you're back to a sufficient steering angle
@@ -221,9 +227,16 @@ void AMVehicleBase::UpdateVehicleForce(int WheelArrowIndex, float DeltaTime)
 		// If the timer exceeds a certain threshold, end the drift
 		if (DriftTimer >= MaxTimeWithoutDrift) {
 			bIsDrifting = false;
+			TargetFrictionMultiplier = NotDriftingFrictionMultiplier;
 		}
 	}
-	DriftFrictionMultiplier = (bIsDrifting && WheelArrowIndex >= 2) ? IsDriftingFrictionMultiplier : NotDriftingFrictionMultiplier;
+	
+	if (!bIsDrifting)
+	{
+		CurrentFrictionMultiplier = FMath::Lerp(CurrentFrictionMultiplier, TargetFrictionMultiplier, FrictionInterpolationSpeed * DeltaTime);
+	}
+	
+	DriftFrictionMultiplier = (WheelArrowIndex >= 2) ? CurrentFrictionMultiplier : NotDriftingFrictionMultiplier;
 	
 	if(WheelArrowIndex < 2) // Assuming indexes 0 and 1 are the front wheels
 		{
