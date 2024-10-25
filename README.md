@@ -1,9 +1,9 @@
 # DriftScape
 ![image](https://github.com/user-attachments/assets/aec23778-097e-498d-839d-2fad9971060e)
 
-DriftScape is an Unreal Engine game project written in C++ currently in developement. It's an arcade-style racing game with a focus on high-speed drifting.
+DriftScape is an Unreal Engine game project written in C++ currently in development. It's an arcade-style racing game with a focus on high-speed drifting.
 
-The player utilizes a handbreak to lose friction on the back wheels of the car and begin the drift
+The player utilizes a handbrake to lose friction on the back wheels of the car and begin the drift
 
 Here's are some Code Samples of a few systems developed to achieve this.
 
